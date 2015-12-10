@@ -32,14 +32,25 @@
 package com.lmax;
 
 import com.lmax.disruptor.EventPoller;
+import com.lmax.disruptor.InsufficientCapacityException;
 import com.lmax.disruptor.RingBuffer;
 import com.lmax.disruptor.YieldingWaitStrategy;
 import org.openjdk.jmh.annotations.*;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
+
 @State(Scope.Group)
-@Threads(4)
+@Threads(1)
 public class MultiProducerBenchmark
 {
+    @Param("1000")
+    public int burstSize;
+
+    @Param("3")
+    public int producerCount;
+
     private static final int BUFFER_SIZE = 1024 * 64;
     private final RingBuffer<ValueEvent> ringBuffer =
         RingBuffer.createMultiProducer(ValueEvent.EVENT_FACTORY, BUFFER_SIZE, new YieldingWaitStrategy());
@@ -49,23 +60,95 @@ public class MultiProducerBenchmark
         ringBuffer.addGatingSequences(poller.getSequence());
     }
 
+    private List<Thread> producerThreads = new ArrayList<Thread>();
+    private AtomicBoolean running;
+
+    @Setup(Level.Trial)
+    public void setup() throws Exception
+    {
+        running = new AtomicBoolean(true);
+
+        for (int i = 0; i < producerCount; i++)
+        {
+            final Thread pThread = new Thread(new Producer(running, ringBuffer, burstSize));
+
+            pThread.setName("publisher");
+
+            pThread.start();
+            producerThreads.add(pThread);
+        }
+    }
+
+    @TearDown(Level.Trial)
+    public void tearDown() throws InterruptedException
+    {
+        running.set(false);
+        for (Thread publisherThread : producerThreads)
+        {
+            publisherThread.join();
+        }
+    }
+
     private long writeValue = 3;
 
-    @Benchmark
-    @Group("g")
-    @GroupThreads(3)
-    public void producer()
+    private static class Producer implements Runnable
     {
-        long next = ringBuffer.next();
-        ringBuffer.get(next).setValue(writeValue);
-        ringBuffer.publish(next);
+        private final AtomicBoolean running;
+        private final RingBuffer<ValueEvent> ringBuffer;
+        private final int burstSize;
+        private long writeValue = 3;
+
+        public Producer(AtomicBoolean running, RingBuffer<ValueEvent> ringBuffer, final int burstSize)
+        {
+            this.running = running;
+            this.ringBuffer = ringBuffer;
+            this.burstSize = burstSize;
+        }
+
+        @Override
+        public void run()
+        {
+            final int burstSize = this.burstSize;
+            final AtomicBoolean running = this.running;
+
+            while (running.get())
+            {
+                for (int i = 0; i < burstSize; i++)
+                {
+                    retry:
+                    try
+                    {
+                        ringBuffer.tryNext();
+                    }
+                    catch (InsufficientCapacityException e)
+                    {
+                        if (!running.get())
+                        {
+                            return;
+                        }
+
+                        break retry;
+                    }
+                }
+            }
+        }
     }
+
+//    @Benchmark
+//    @Group("g")
+//    @GroupThreads(3)
+//    public void producer()
+//    {
+//        long next = ringBuffer.next();
+//        ringBuffer.get(next).setValue(writeValue);
+//        ringBuffer.publish(next);
+//    }
 
     @Benchmark
     @Group("g")
     @GroupThreads(1)
     public void consumer() throws Exception
     {
-        poller.poll((valueEvent, l, b) -> true);
+        poller.poll((valueEvent, l, b) -> false);
     }
 }
