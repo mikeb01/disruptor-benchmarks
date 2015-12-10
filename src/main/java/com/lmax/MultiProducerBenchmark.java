@@ -42,7 +42,7 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 @State(Scope.Group)
-@Threads(1)
+//@Threads(1)
 public class MultiProducerBenchmark
 {
     @Param("1000")
@@ -62,6 +62,7 @@ public class MultiProducerBenchmark
 
     private List<Thread> producerThreads = new ArrayList<Thread>();
     private AtomicBoolean running;
+    private final ValueHandler handler = new ValueHandler();
 
     @Setup(Level.Trial)
     public void setup() throws Exception
@@ -118,7 +119,9 @@ public class MultiProducerBenchmark
                     retry:
                     try
                     {
-                        ringBuffer.tryNext();
+                        final long l = ringBuffer.tryNext();
+                        ringBuffer.get(l).setValue(writeValue);
+                        ringBuffer.publish(l);
                     }
                     catch (InsufficientCapacityException e)
                     {
@@ -144,11 +147,30 @@ public class MultiProducerBenchmark
 //        ringBuffer.publish(next);
 //    }
 
+    private static class ValueHandler implements EventPoller.Handler<ValueEvent>
+    {
+        private final int maxMessages = 64;
+        private int count = 0;
+
+        @Override
+        public boolean onEvent(final ValueEvent valueEvent, final long l, final boolean b) throws Exception
+        {
+            count++;
+            return count >= maxMessages;
+        }
+
+        public void reset()
+        {
+            count = 0;
+        }
+    }
+
     @Benchmark
     @Group("g")
     @GroupThreads(1)
     public void consumer() throws Exception
     {
-        poller.poll((valueEvent, l, b) -> false);
+        handler.reset();
+        poller.poll(handler);
     }
 }
