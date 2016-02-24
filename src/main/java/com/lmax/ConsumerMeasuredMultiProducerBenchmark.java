@@ -1,10 +1,7 @@
 
 package com.lmax;
 
-import com.lmax.disruptor.EventPoller;
-import com.lmax.disruptor.InsufficientCapacityException;
-import com.lmax.disruptor.RingBuffer;
-import com.lmax.disruptor.YieldingWaitStrategy;
+import com.lmax.disruptor.*;
 import org.openjdk.jmh.annotations.*;
 
 import java.util.ArrayList;
@@ -13,17 +10,17 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 @State(Scope.Group)
 @Threads(1)
-public class MultiProducerBenchmark
+public class ConsumerMeasuredMultiProducerBenchmark
 {
     @Param("1000")
     public int burstSize;
 
-    @Param("1")
+    @Param("3")
     public int producerCount;
 
     private static final int BUFFER_SIZE = 1024 * 64;
     private final RingBuffer<ValueEvent> ringBuffer =
-        RingBuffer.createMultiProducer(ValueEvent.EVENT_FACTORY, BUFFER_SIZE, new YieldingWaitStrategy());
+        RingBuffer.createMultiProducer(ValueEvent.EVENT_FACTORY, BUFFER_SIZE, new BusySpinWaitStrategy());
 
     private final EventPoller<ValueEvent> poller = ringBuffer.newPoller();
     {
