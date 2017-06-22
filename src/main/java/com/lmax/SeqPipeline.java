@@ -46,8 +46,11 @@ public class SeqPipeline
 
         Disruptor<PipelinerEvent> disruptor =
             new Disruptor<>(PipelinerEvent.FACTORY, 1024, DaemonThreadFactory.INSTANCE, ProducerType.SINGLE, waitStrategy);
-        disruptor.handleEventsWith(new ParallelHandler(0, 3), new ParallelHandler(1, 3),
-            new ParallelHandler(2, 3)).then(new JoiningHandler());
+        disruptor.handleEventsWith(
+            new ParallelHandler(0, 3),
+            new ParallelHandler(1, 3),
+            new ParallelHandler(2, 3))
+            .then(new JoiningHandler());
         rb = disruptor.start();
     }
 
